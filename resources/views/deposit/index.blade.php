@@ -50,7 +50,7 @@
                             value="{{ old('amount') }}"
                         >
                         <p class="mt-1 text-xs text-gray-500">
-                            Số tiền tối thiểu: 1,000 VNĐ - Tối đa: 100,000,000 VNĐ
+                            Số tiền tối thiểu: 1,000 VNĐ
                         </p>
                     </div>
 
@@ -95,6 +95,7 @@
                                 <tr 
                                     class="border-b border-gray-200 transaction-row"
                                     data-transaction-id="{{ $transaction->id }}"
+                                    data-deposit-code="{{ $transaction->deposit_code ?? '' }}"
                                     data-status="{{ $transaction->status }}"
                                 >
                                     <td class="py-2 px-4 text-gray-600">
@@ -132,147 +133,9 @@
 
     @push('scripts')
     <script>
-        // Auto-refresh status của các transactions đang pending
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('Transaction status checker initialized on deposit page');
-            
-            // Lấy danh sách ID của các transactions đang pending
-            function getPendingTransactionIds() {
-                const rows = document.querySelectorAll('tr.transaction-row[data-status="pending"]');
-                console.log('Found pending transaction rows:', rows.length);
-                
-                const ids = Array.from(rows)
-                    .map(row => {
-                        const id = parseInt(row.getAttribute('data-transaction-id'));
-                        console.log('Transaction ID:', id, 'Status:', row.getAttribute('data-status'));
-                        return id;
-                    })
-                    .filter(id => !isNaN(id));
-                
-                return ids;
-            }
-            
-            let pendingTransactionIds = getPendingTransactionIds();
-            console.log('Pending transaction IDs:', pendingTransactionIds);
-            
-            if (pendingTransactionIds.length === 0) {
-                console.log('No pending transactions found, stopping checker');
-                return; // Không có transaction nào đang pending
-            }
-            
-            console.log('Starting status checker for', pendingTransactionIds.length, 'transactions');
-            
-            // Function để update status badge
-            function updateStatusBadge(badge, newStatus) {
-                badge.setAttribute('data-status', newStatus);
-                
-                if (newStatus === 'completed') {
-                    badge.className = 'px-2 py-1 bg-green-100 text-green-700 rounded text-xs status-badge';
-                    badge.textContent = 'Hoàn thành';
-                } else if (newStatus === 'pending') {
-                    badge.className = 'px-2 py-1 bg-yellow-100 text-yellow-700 rounded text-xs status-badge';
-                    badge.textContent = 'Đang chờ';
-                } else {
-                    badge.className = 'px-2 py-1 bg-red-100 text-red-700 rounded text-xs status-badge';
-                    badge.textContent = 'Thất bại';
-                }
-            }
-            
-            // Function để update transaction row
-            function updateTransactionRow(transactionId, newStatus) {
-                const row = document.querySelector(`tr.transaction-row[data-transaction-id="${transactionId}"]`);
-                if (!row) return;
-                
-                const currentStatus = row.getAttribute('data-status');
-                if (currentStatus === newStatus) return; // Không có thay đổi
-                
-                // Update row status
-                row.setAttribute('data-status', newStatus);
-                
-                // Update status badge
-                const statusBadge = row.querySelector('.status-badge');
-                if (statusBadge) {
-                    updateStatusBadge(statusBadge, newStatus);
-                }
-                
-                // Nếu đã completed, thêm animation
-                if (newStatus === 'completed') {
-                    row.classList.add('bg-green-50', 'transition-colors', 'duration-500');
-                    setTimeout(() => {
-                        row.classList.remove('bg-green-50');
-                    }, 3000);
-                }
-            }
-            
-            // Function để check status từ server
-            function checkStatus() {
-                // Lấy lại danh sách pending IDs (có thể đã thay đổi)
-                pendingTransactionIds = getPendingTransactionIds();
-                
-                if (pendingTransactionIds.length === 0) {
-                    console.log('No more pending transactions, stopping checker');
-                    return; // Không còn transaction nào pending
-                }
-                
-                // Check từng transaction riêng biệt
-                pendingTransactionIds.forEach(transactionId => {
-                    const url = '{{ route("transactions.check-status", ["id" => ":id"]) }}'.replace(':id', transactionId);
-                    console.log('Checking status for transaction:', transactionId, 'URL:', url);
-                    
-                    fetch(url, {
-                        method: 'GET',
-                        headers: {
-                            'Accept': 'application/json',
-                            'X-Requested-With': 'XMLHttpRequest',
-                        },
-                    })
-                    .then(response => {
-                        console.log('Response status:', response.status, 'for transaction:', transactionId);
-                        if (!response.ok) {
-                            throw new Error('Network response was not ok: ' + response.status);
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        console.log('Response data for transaction', transactionId, ':', data);
-                        if (data.success && data.transactions && data.transactions.length > 0) {
-                            const transaction = data.transactions[0];
-                            console.log('Updating transaction:', transaction.id, 'Status:', transaction.status);
-                            updateTransactionRow(transaction.id, transaction.status);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error checking transaction status for', transactionId, ':', error);
-                    });
-                });
-            }
-            
-            // Check status mỗi 1 giây (1 req/s)
-            console.log('Setting up interval to check status every 1 second');
-            const intervalId = setInterval(() => {
-                // Kiểm tra lại xem còn transaction nào pending không
-                pendingTransactionIds = getPendingTransactionIds();
-                
-                if (pendingTransactionIds.length === 0) {
-                    // Không còn transaction nào pending, dừng polling
-                    console.log('No pending transactions, clearing interval');
-                    clearInterval(intervalId);
-                    return;
-                }
-                
-                console.log('Interval tick - checking status for', pendingTransactionIds.length, 'transactions');
-                checkStatus();
-            }, 1000); // 1 giây = 1000ms
-            
-            console.log('Interval ID:', intervalId);
-            
-            // Cleanup khi user rời khỏi trang
-            window.addEventListener('beforeunload', () => {
-                if (intervalId) {
-                    clearInterval(intervalId);
-                }
-            });
-        });
+        // Set data cho JavaScript
+        window.checkStatusUrlTemplate = '{{ route("transactions.check-status", ["deposit_code" => ":code"]) }}';
     </script>
+    @vite(['resources/js/deposit.js'])
     @endpush
 @endsection

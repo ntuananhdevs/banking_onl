@@ -67,13 +67,13 @@ class SepayService
      *
      * @param int $amount Số tiền (VNĐ)
      * @param string $orderInvoiceNumber Mã hóa đơn (unique)
-     * @param int $userId User ID để tạo nội dung chuyển khoản
+     * @param string $depositCode Deposit code để tạo nội dung chuyển khoản
      * @return array Thông tin checkout bao gồm form fields và checkout URL
      */
-    public function createBankTransferCheckout(int $amount, string $orderInvoiceNumber, int $userId): array
+    public function createBankTransferCheckout(int $amount, string $orderInvoiceNumber, string $depositCode): array
     {
         try {
-            $transferContent = $this->generateTransferContent($userId);
+            $transferContent = $this->generateTransferContent($depositCode);
             
             // Tạo checkout data với BANK_TRANSFER method để có QR code
             $checkoutData = CheckoutBuilder::make()
@@ -82,7 +82,7 @@ class SepayService
                 ->operation('PURCHASE')
                 ->orderDescription($transferContent)
                 ->orderInvoiceNumber($orderInvoiceNumber)
-                ->customerId((string) $userId)
+                ->customerId($depositCode)
                 ->paymentMethod('BANK_TRANSFER') // Sử dụng BANK_TRANSFER để có QR code
                 ->successUrl($this->getSuccessUrl())
                 ->errorUrl($this->getErrorUrl())
@@ -98,7 +98,7 @@ class SepayService
             Log::info('SePay checkout created', [
                 'order_invoice_number' => $orderInvoiceNumber,
                 'amount' => $amount,
-                'user_id' => $userId,
+                'deposit_code' => $depositCode,
             ]);
 
             return [
@@ -258,15 +258,15 @@ class SepayService
     }
 
     /**
-     * Tạo nội dung chuyển khoản theo format: "NAPTIEN user_id_XXX"
+     * Tạo nội dung chuyển khoản theo format: "NAPTIEN DEPOSIT_CODE"
      *
-     * @param int $userId
+     * @param string $depositCode
      * @return string
      */
-    public function generateTransferContent(int $userId): string
+    public function generateTransferContent(string $depositCode): string
     {
         $prefix = config('sepay.transfer_content_prefix', 'NAPTIEN');
-        return "{$prefix} user_id_{$userId}";
+        return "{$prefix} {$depositCode}";
     }
 
     /**

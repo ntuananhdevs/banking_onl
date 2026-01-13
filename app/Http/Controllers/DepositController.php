@@ -57,14 +57,18 @@ class DepositController extends Controller
         try {
             // Tạo mã hóa đơn unique
             $orderInvoiceNumber = 'DEPOSIT_' . $user->id . '_' . time() . '_' . Str::random(6);
+            
+            // Tạo deposit_code unique (format: uppercase alphanumeric, 8-12 ký tự)
+            $depositCode = strtoupper(Str::random(10));
 
             // Tạo transaction record với status pending
             $transaction = Transaction::create([
                 'user_id' => $user->id,
+                'deposit_code' => $depositCode,
                 'amount' => $amount,
                 'type' => 'deposit',
                 'status' => 'pending',
-                'transfer_content' => $this->sepayService->generateTransferContent($user->id),
+                'transfer_content' => $this->sepayService->generateTransferContent($depositCode),
                 'transaction_id' => $orderInvoiceNumber,
                 'metadata' => [
                     'created_via' => 'web',
@@ -76,7 +80,7 @@ class DepositController extends Controller
             $checkoutResult = $this->sepayService->createBankTransferCheckout(
                 $amount,
                 $orderInvoiceNumber,
-                $user->id
+                $depositCode
             );
 
             // Lưu thông tin checkout và QR code vào metadata
@@ -123,7 +127,7 @@ class DepositController extends Controller
             ]);
 
             // Redirect đến trang chi tiết giao dịch
-            return redirect()->route('deposit.show', ['id' => $transaction->id])
+            return redirect()->route('deposit.show', ['deposit_code' => $transaction->deposit_code])
                 ->with('success', 'Yêu cầu nạp tiền đã được tạo thành công. Vui lòng quét QR code để thanh toán.');
 
         } catch (\Exception $e) {
@@ -143,11 +147,11 @@ class DepositController extends Controller
     /**
      * Hiển thị chi tiết giao dịch với QR code
      */
-    public function show($id)
+    public function show($depositCode)
     {
         $user = Auth::user();
         
-        $transaction = Transaction::where('id', $id)
+        $transaction = Transaction::where('deposit_code', $depositCode)
             ->where('user_id', $user->id)
             ->firstOrFail();
 

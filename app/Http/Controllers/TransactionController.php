@@ -84,35 +84,33 @@ class TransactionController extends Controller
     /**
      * API endpoint để check status của transaction
      * Sử dụng cho auto-refresh (polling)
-     * URL: /transactions/status/{id}
+     * URL: /transactions/status/{deposit_code}
      */
-    public function checkStatus($id)
+    public function checkStatus($depositCode)
     {
         $user = Auth::user();
         
-        // Validate transaction ID
-        $transactionId = (int) $id;
-        
-        if (empty($transactionId) || $transactionId <= 0) {
-            Log::warning('TransactionController::checkStatus - Invalid transaction ID', [
-                'transaction_id' => $id,
+        // Validate deposit_code
+        if (empty($depositCode) || !is_string($depositCode)) {
+            Log::warning('TransactionController::checkStatus - Invalid deposit code', [
+                'deposit_code' => $depositCode,
                 'user_id' => $user->id,
             ]);
             return response()->json([
                 'success' => false,
-                'error' => 'Invalid transaction ID',
+                'error' => 'Invalid deposit code',
                 'transactions' => [],
             ], 400);
         }
         
-        // Lấy thông tin mới nhất của transaction
+        // Lấy thông tin mới nhất của transaction theo deposit_code
         $transaction = Transaction::where('user_id', $user->id)
-            ->where('id', $transactionId)
-            ->first(['id', 'status', 'transaction_id', 'metadata', 'amount', 'type']);
+            ->where('deposit_code', $depositCode)
+            ->first(['id', 'deposit_code', 'status', 'transaction_id', 'metadata', 'amount', 'type']);
         
         if (!$transaction) {
             Log::warning('TransactionController::checkStatus - Transaction not found', [
-                'transaction_id' => $transactionId,
+                'deposit_code' => $depositCode,
                 'user_id' => $user->id,
             ]);
             return response()->json([
@@ -124,6 +122,7 @@ class TransactionController extends Controller
         
         $transactionData = [
             'id' => $transaction->id,
+            'deposit_code' => $transaction->deposit_code,
             'status' => $transaction->status,
             'transaction_id' => $transaction->transaction_id,
             'metadata' => $transaction->metadata,
@@ -133,7 +132,7 @@ class TransactionController extends Controller
         
         Log::debug('TransactionController::checkStatus', [
             'user_id' => $user->id,
-            'transaction_id' => $transactionId,
+            'deposit_code' => $depositCode,
             'status' => $transaction->status,
         ]);
         

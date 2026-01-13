@@ -22,11 +22,11 @@ Route::middleware('auth')->group(function () {
     // Deposit routes
     Route::get('/deposit', [DepositController::class, 'index'])->name('deposit.index');
     Route::post('/deposit', [DepositController::class, 'create'])->name('deposit.create');
-    Route::get('/deposit/{id}', [DepositController::class, 'show'])->name('deposit.show');
+    Route::get('/deposit/{deposit_code}', [DepositController::class, 'show'])->name('deposit.show');
     
     // Transaction log routes
     Route::get('/transactions', [TransactionController::class, 'index'])->name('transactions.index');
-    Route::get('/transactions/status/{id}', [TransactionController::class, 'checkStatus'])->name('transactions.check-status');
+    Route::get('/transactions/status/{deposit_code}', [TransactionController::class, 'checkStatus'])->name('transactions.check-status');
     
     // Logout route
     Route::post('/logout', [LoginController::class, 'logout'])->name('logout');

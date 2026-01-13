@@ -107,7 +107,7 @@
                             <th class="text-left py-3 px-4 font-medium text-gray-900">Loại</th>
                             <th class="text-left py-3 px-4 font-medium text-gray-900">Số tiền</th>
                             <th class="text-left py-3 px-4 font-medium text-gray-900">Trạng thái</th>
-                            <th class="text-left py-3 px-4 font-medium text-gray-900">Mã giao dịch</th>
+                            <th class="text-left py-3 px-4 font-medium text-gray-900">Mã nạp tiền</th>
                             <th class="text-left py-3 px-4 font-medium text-gray-900">Nội dung</th>
                         </tr>
                     </thead>
@@ -155,7 +155,7 @@
                                     @endif
                                 </td>
                                 <td class="py-3 px-4 text-gray-600 font-mono text-xs">
-                                    {{ $transaction->transaction_id ?? '-' }}
+                                    {{ $transaction->deposit_code ?? $transaction->transaction_id ?? '-' }}
                                 </td>
                                 <td class="py-3 px-4 text-gray-600 text-xs">
                                     <div class="max-w-xs truncate" title="{{ $transaction->transfer_content ?? '-' }}">
@@ -163,7 +163,7 @@
                                     </div>
                                     @if($transaction->type === 'deposit' && $transaction->status === 'pending')
                                         <a 
-                                            href="{{ route('deposit.show', $transaction->id) }}"
+                                            href="{{ route('deposit.show', $transaction->deposit_code ?? $transaction->id) }}"
                                             class="text-blue-600 hover:underline text-xs mt-1 inline-block"
                                         >
                                             Xem chi tiết

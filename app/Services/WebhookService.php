@@ -57,8 +57,6 @@ class WebhookService
             return false;
         }
 
-        // Nếu không có cả signature và Bearer token, nhưng có webhook secret
-        // Cho phép bypass nếu webhook secret không được cấu hình (development mode)
         if (empty($this->webhookSecret)) {
             Log::warning('No signature or Bearer token provided, and webhook secret not configured. Allowing request (development mode)');
             return true; // Cho phép trong development mode
@@ -68,11 +66,56 @@ class WebhookService
         return false;
     }
 
-    /**
-     * Parse nội dung chuyển khoản để tìm user_id
-     * Format: "NAPTIEN user_id_123" hoặc "NAPTIENuserid2" (không có space)
-     */
-    public function parseTransferContent(string $content): ?int
+
+    public function parseTransferContent(string $content): ?string
+    {
+        $prefix = config('sepay.transfer_content_prefix', 'NAPTIEN');
+        
+        $pattern1 = '/^' . preg_quote($prefix, '/') . '\s+([A-Za-z0-9_-]+)/i';
+        if (preg_match($pattern1, $content, $matches)) {
+            $code = trim($matches[1]);
+            // Kiểm tra nếu không phải format cũ (user_id_XXX)
+            if (!preg_match('/^user_id_\d+$/i', $code)) {
+                return $code;
+            }
+        }
+        
+        $pattern2 = '/^' . preg_quote($prefix, '/') . '([A-Z0-9]{6,20})(?:\s|$)/i';
+        if (preg_match($pattern2, $content, $matches)) {
+            $code = $matches[1];
+            // Kiểm tra nếu không phải format cũ (userid hoặc user_id)
+            if (!preg_match('/^userid\d+$/i', $code) && !preg_match('/^user_id_\d+$/i', $code)) {
+                return $code;
+            }
+        }
+        
+        $pattern3 = '/^' . preg_quote($prefix, '/') . 'userid(\d+)/i';
+        if (preg_match($pattern3, $content, $matches)) {
+            // Trả về null để xử lý theo cách cũ (parse user_id)
+            return null;
+        }
+        
+        $pattern4 = '/^' . preg_quote($prefix, '/') . 'user_id_(\d+)/i';
+        if (preg_match($pattern4, $content, $matches)) {
+            // Trả về null để xử lý theo cách cũ (parse user_id)
+            return null;
+        }
+        
+        $pattern5 = '/^' . preg_quote($prefix, '/') . '\s+user_id_(\d+)/i';
+        if (preg_match($pattern5, $content, $matches)) {
+            // Trả về null để xử lý theo cách cũ (parse user_id)
+            return null;
+        }
+
+        Log::warning('Failed to parse deposit_code from transfer content', [
+            'content' => $content,
+            'prefix' => $prefix,
+        ]);
+
+        return null;
+    }
+
+    public function parseUserIdFromTransferContent(string $content): ?int
     {
         $prefix = config('sepay.transfer_content_prefix', 'NAPTIEN');
         
@@ -94,11 +137,6 @@ class WebhookService
             return (int) $matches[1];
         }
 
-        Log::warning('Failed to parse transfer content', [
-            'content' => $content,
-            'prefix' => $prefix,
-        ]);
-
         return null;
     }
 
@@ -108,24 +146,19 @@ class WebhookService
     public function processDeposit(array $webhookData): array
     {
         try {
-            // SePay IPN có thể gửi với format khác nhau
-            // Hỗ trợ cả format SePay SDK, format custom và format Bank API
-            
-            // Lấy amount từ các trường có thể có
+
             $amount = $webhookData['transferAmount'] 
                    ?? $webhookData['amount'] 
                    ?? $webhookData['order_amount'] 
                    ?? $webhookData['transaction_amount']
                    ?? null;
             
-            // Lấy transfer_content từ các trường có thể có
             $transferContent = $webhookData['content']
                             ?? $webhookData['transfer_content']
                             ?? $webhookData['order_description']
                             ?? $webhookData['description']
                             ?? null;
             
-            // Lấy transaction_id từ các trường có thể có
             $transactionId = $webhookData['referenceCode']
                           ?? $webhookData['id']
                           ?? $webhookData['transaction_id']
@@ -134,7 +167,6 @@ class WebhookService
                           ?? $webhookData['invoice_number']
                           ?? null;
             
-            // Validate required fields
             if (empty($transferContent)) {
                 Log::warning('IPN missing transfer_content', ['data' => $webhookData]);
                 return [
@@ -151,38 +183,68 @@ class WebhookService
                 ];
             }
 
-            // Parse user_id từ transfer content
-            $userId = $this->parseTransferContent($transferContent);
+            $depositCode = $this->parseTransferContent($transferContent);
             
-            if (!$userId) {
-                Log::warning('Could not parse user_id from transfer content', [
-                    'transfer_content' => $transferContent,
-                    'data' => $webhookData,
-                ]);
-                return [
-                    'success' => false,
-                    'error' => 'Could not parse user_id from transfer content',
-                ];
+            $userId = null;
+            if (!$depositCode) {
+                $userId = $this->parseUserIdFromTransferContent($transferContent);
+                if (!$userId) {
+                    Log::warning('Could not parse deposit_code or user_id from transfer content', [
+                        'transfer_content' => $transferContent,
+                        'data' => $webhookData,
+                    ]);
+                    return [
+                        'success' => false,
+                        'error' => 'Could not parse deposit_code or user_id from transfer content',
+                    ];
+                }
+                
+                $user = User::find($userId);
+                
+                if (!$user) {
+                    return [
+                        'success' => false,
+                        'error' => 'User not found',
+                    ];
+                }
+                
+                $pendingTransaction = Transaction::where('user_id', $userId)
+                    ->where('amount', $amount)
+                    ->where('status', 'pending')
+                    ->where('type', 'deposit')
+                    ->orderBy('created_at', 'desc')
+                    ->first();
+            } else {
+                $pendingTransaction = Transaction::where('deposit_code', $depositCode)
+                    ->where('amount', $amount)
+                    ->where('status', 'pending')
+                    ->where('type', 'deposit')
+                    ->orderBy('created_at', 'desc')
+                    ->first();
+                
+                if ($pendingTransaction) {
+                    $userId = $pendingTransaction->user_id;
+                    $user = User::find($userId);
+                    
+                    if (!$user) {
+                        return [
+                            'success' => false,
+                            'error' => 'User not found',
+                        ];
+                    }
+                } else {
+                    Log::warning('Could not find transaction with deposit_code', [
+                        'deposit_code' => $depositCode,
+                        'transfer_content' => $transferContent,
+                        'amount' => $amount,
+                    ]);
+                    return [
+                        'success' => false,
+                        'error' => 'Transaction not found with deposit_code',
+                    ];
+                }
             }
-
-            // Tìm user
-            $user = User::find($userId);
             
-            if (!$user) {
-                return [
-                    'success' => false,
-                    'error' => 'User not found',
-                ];
-            }
-            
-            $pendingTransaction = Transaction::where('user_id', $userId)
-                ->where('amount', $amount)
-                ->where('status', 'pending')
-                ->where('type', 'deposit')
-                ->orderBy('created_at', 'desc')
-                ->first();
-            
-            // Nếu tìm thấy transaction đang pending, cập nhật status
             if ($pendingTransaction) {
                 Log::info('Found pending transaction, updating status', [
                     'transaction_id' => $pendingTransaction->id,
@@ -190,7 +252,6 @@ class WebhookService
                     'sepay_reference_code' => $transactionId,
                 ]);
                 
-                // Sử dụng database transaction để đảm bảo tính nhất quán
                 return DB::transaction(function () use ($user, $webhookData, $userId, $transactionId, $amount, $transferContent, $pendingTransaction) {
                     // Cập nhật transaction
                     $metadata = $pendingTransaction->metadata ?? [];
@@ -205,8 +266,6 @@ class WebhookService
                         
                     ]);
                     
-                    // Cập nhật balance (chỉ cộng thêm nếu chưa được cộng)
-                    // Kiểm tra xem đã cộng chưa bằng cách check metadata
                     if (!isset($metadata['balance_updated'])) {
                         $user->incrementBalance($amount);
                         $pendingTransaction->update([
@@ -229,8 +288,7 @@ class WebhookService
                 });
             }
             
-            // Kiểm tra xem transaction đã completed chưa (tránh duplicate)
-            // Tìm theo transaction_id hoặc referenceCode trong metadata
+
             if ($transactionId) {
                 $existingTransaction = Transaction::where('user_id', $userId)
                     ->where(function ($query) use ($transactionId) {

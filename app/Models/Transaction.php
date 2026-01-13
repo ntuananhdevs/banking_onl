@@ -9,6 +9,7 @@ class Transaction extends Model
 {
     protected $fillable = [
         'user_id',
+        'deposit_code',
         'amount',
         'type',
         'status',
